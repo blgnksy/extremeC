@@ -16,6 +16,13 @@ jobs:
         with:
           submodules: recursive
 
+      # Debug: Test token access
+      - name: Test Token Access
+        run: |
+          echo "Testing access to target repository..."
+          git ls-remote https://${{ secrets.GH_PAT }}@github.com/blgnksy/blgnksy.github.io.git
+        continue-on-error: true
+
       # Install Doxygen
       - name: Install Doxygen
         run: |
@@ -27,6 +34,31 @@ jobs:
         run: |
           cd docs
           doxygen Doxyfile.in
+          # Add .nojekyll ONLY in the documentation folder
+          touch html/.nojekyll
+          # Debug: Check what files were generated
+          echo "Files in docs/html:"
+          ls -la html/
+          # Check if index.html exists
+          if [ ! -f "html/index.html" ]; then
+            echo "Warning: index.html not found!"
+            # If no index.html but files.html exists, create a redirect
+            if [ -f "html/files.html" ]; then
+              echo "Creating redirect from index.html to files.html"
+              cat > html/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta http-equiv="refresh" content="0; url=files.html">
+              <script>window.location.href = "files.html";</script>
+          </head>
+          <body>
+              <p>Redirecting to documentation...</p>
+          </body>
+          </html>
+          EOF
+            fi
+          fi
 
       # Deploy to GitHub Pages in another repository
       - name: Deploy to GitHub Pages
@@ -34,7 +66,7 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
           repository-name: blgnksy/blgnksy.github.io
-          branch: master  # The branch your blog uses
+          branch: master  # Changed from 'main' to 'master' based on error log
           folder: docs/html  # The folder containing Doxygen output
           target-folder: extremeC  # Where to place it in the target repo
           clean: true  # Remove old files in target folder
