@@ -14,5 +14,8 @@ jobs:
     steps:
       - uses: DenverCoder1/doxygen-github-pages-action@v2.0.0
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GH_PAT }}
           config_file: docs/Doxyfile.in
+          github_pages_repo: blgnksy/blgnksy.github.io
+          github_pages_branch: naster  # or 'master' - use whatever branch your blog uses
+          target_folder: extremeC  # or 'docs/project-name'
