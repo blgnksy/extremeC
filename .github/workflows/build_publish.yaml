@@ -9,6 +9,13 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       # Checkout current repository
       - name: Checkout
@@ -27,17 +34,24 @@ jobs:
         run: |
           cd docs
           doxygen Doxyfile.in
-          # Add .nojekyll to prevent Jekyll processing
+          # Add .nojekyll to prevent any Jekyll processing
           touch html/.nojekyll
-          # Debug: Check what files were generated
-          echo "Files in docs/html:"
-          ls -la html/
+          # Ensure index.html exists
+          if [ ! -f "html/index.html" ] && [ -f "html/files.html" ]; then
+            echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=files.html"></head></html>' > html/index.html
+          fi
 
-      # Deploy to gh-pages branch of current repo
-      - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@v4
+      # Setup Pages
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      # Upload artifact
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          token: ${{ secrets.GH_PAT }}  # Use built-in token
-          branch: gh-pages  # Deploy to gh-pages branch
-          folder: docs/html
-          clean: true
+          path: docs/html
+
+      # Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
