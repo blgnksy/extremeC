@@ -16,13 +16,6 @@ jobs:
         with:
           submodules: recursive
 
-      # Debug: Test token access
-      - name: Test Token Access
-        run: |
-          echo "Testing access to target repository..."
-          git ls-remote https://${{ secrets.GH_PAT }}@github.com/blgnksy/blgnksy.github.io.git
-        continue-on-error: true
-
       # Install Doxygen
       - name: Install Doxygen
         run: |
@@ -34,64 +27,17 @@ jobs:
         run: |
           cd docs
           doxygen Doxyfile.in
-          # Add .nojekyll ONLY in the documentation folder
+          # Add .nojekyll to prevent Jekyll processing
           touch html/.nojekyll
           # Debug: Check what files were generated
           echo "Files in docs/html:"
           ls -la html/
-          # Check if index.html exists
-          if [ ! -f "html/index.html" ]; then
-            echo "Warning: index.html not found!"
-            # If no index.html but files.html exists, create a redirect
-            if [ -f "html/files.html" ]; then
-              echo "Creating redirect from index.html to files.html"
-              cat > html/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta http-equiv="refresh" content="0; url=files.html">
-              <script>window.location.href = "files.html";</script>
-          </head>
-          <body>
-              <p>Redirecting to documentation...</p>
-          </body>
-          </html>
-          EOF
-            fi
-          fi
 
-      # Deploy to GitHub Pages in another repository
+      # Deploy to gh-pages branch of current repo
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          token: ${{ secrets.GH_PAT }}
-          repository-name: blgnksy/blgnksy.github.io
-          branch: master
+          token: ${{ secrets.GITHUB_TOKEN }}  # Use built-in token
+          branch: gh-pages  # Deploy to gh-pages branch
           folder: docs/html
-          target-folder: _extremeC  # Underscore makes Jekyll ignore it
           clean: true
-          clean-exclude: |
-            !extremeC/**
-
-      # Always trigger Jekyll rebuild by updating a timestamp file
-      - name: Trigger Jekyll Build
-        run: |
-          # Clone the repository
-          git clone https://${{ secrets.GH_PAT }}@github.com/blgnksy/blgnksy.github.io.git temp-repo
-          cd temp-repo
-          
-          # Configure git
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          
-          # Create or update a timestamp file
-          echo "Last documentation update: $(date)" > .last-doc-update
-          
-          # Commit and push
-          git add .last-doc-update
-          git commit -m "Trigger Jekyll rebuild - documentation updated"
-          git push
-          
-          # Cleanup
-          cd ..
-          rm -rf temp-repo
