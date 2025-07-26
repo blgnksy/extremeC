@@ -1,4 +1,4 @@
-name: Doxygen GitHub Pages Deploy Action
+name: Deploy Doxygen Documentation
 
 on:
   push:
@@ -7,12 +7,36 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: DenverCoder1/doxygen-github-pages-action@v2.0.0
+      # Checkout current repository
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          github_token: ${{ secrets.GH_PAT }}
-          config_file: docs/Doxyfile.in
+          submodules: recursive
+
+      # Install Doxygen
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      # Generate documentation
+      - name: Generate Documentation
+        run: |
+          cd docs
+          doxygen Doxyfile.in
+
+      # Deploy to GitHub Pages in another repository
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          repository-name: blgnksy/blgnksy.github.io
+          branch: master  # The branch your blog uses
+          folder: docs/html  # The folder containing Doxygen output
+          target-folder: extremeC  # Where to place it in the target repo
+          clean: true  # Remove old files in target folder
+          clean-exclude: |
+            !extremeC/**
