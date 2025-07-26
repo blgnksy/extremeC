@@ -1,0 +1,44 @@
+cmake_minimum_required(VERSION 3.31)
+project(extremeC C)
+
+set(CMAKE_C_STANDARD 23)
+
+add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
+
+#################################
+# Generate Docs
+#################################
+OPTION(BUILD_WITH_DOCS "Generate Docs" ON)
+IF(BUILD_WITH_DOCS)
+    ADD_SUBDIRECTORY(${CMAKE_CURRENT_SOURCE_DIR}/docs)
+ENDIF()
+
+
+file(GLOB_RECURSE ALL_SOURCE_FILES src/*.cpp include/*.h)
+
+add_custom_target(
+        clangformat
+        COMMAND /usr/bin/clang-format
+        -style=LLVM
+        -i
+        ${ALL_SOURCE_FILES}
+)
+
+
+add_custom_target(
+        cppcheck
+        COMMAND /usr/bin/cppcheck
+        --enable=warning,performance,portability,information,missingInclude
+        --std=c23
+        --library=qt.cfg
+        --template="[{severity}][{id}] {message} {callstack} \(On {file}:{line}\)"
+        --verbose
+        --quiet
+        ${ALL_SOURCE_FILES}
+)
+
+add_executable(preproccessors src/preprocessors.c
+        src/variable_pointers.c)
+add_executable(variable_pointers src/variable_pointers.c)
+add_executable(function src/function.c)
+add_executable(structs src/structs.c)
