@@ -66,9 +66,32 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
           repository-name: blgnksy/blgnksy.github.io
-          branch: master  # Changed from 'main' to 'master' based on error log
-          folder: docs/html  # The folder containing Doxygen output
-          target-folder: extremeC  # Where to place it in the target repo
-          clean: true  # Remove old files in target folder
+          branch: master
+          folder: docs/html
+          target-folder: _extremeC  # Underscore makes Jekyll ignore it
+          clean: true
           clean-exclude: |
             !extremeC/**
+
+      # Always trigger Jekyll rebuild by updating a timestamp file
+      - name: Trigger Jekyll Build
+        run: |
+          # Clone the repository
+          git clone https://${{ secrets.GH_PAT }}@github.com/blgnksy/blgnksy.github.io.git temp-repo
+          cd temp-repo
+          
+          # Configure git
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # Create or update a timestamp file
+          echo "Last documentation update: $(date)" > .last-doc-update
+          
+          # Commit and push
+          git add .last-doc-update
+          git commit -m "Trigger Jekyll rebuild - documentation updated"
+          git push
+          
+          # Cleanup
+          cd ..
+          rm -rf temp-repo
