@@ -1,4 +1,4 @@
-name: Deploy Doxygen Documentation
+name: Build and Deploy Documentation
 
 on:
   push:
@@ -23,23 +23,58 @@ jobs:
         with:
           submodules: recursive
 
-      # Install Doxygen
-      - name: Install Doxygen
+      # Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y doxygen graphviz
+          sudo apt-get install -y cmake doxygen graphviz
 
-      # Generate documentation
-      - name: Generate Documentation
+      # Configure CMake
+      - name: Configure CMake
         run: |
-          cd docs
-          doxygen Doxyfile.in
-          # Add .nojekyll to prevent any Jekyll processing
-          touch html/.nojekyll
-          # Ensure index.html exists
-          if [ ! -f "html/index.html" ] && [ -f "html/files.html" ]; then
-            echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=files.html"></head></html>' > html/index.html
+          cmake -B build -S . -DBUILD_WITH_DOCS=ON
+
+      # Build documentation
+      - name: Build Documentation
+        run: |
+          # Build the docs target
+          cmake --build build --target docs || cmake --build build
+          
+          # Find where the HTML docs were generated
+          echo "Looking for generated documentation..."
+          find build -name "*.html" -type f | head -10
+          
+          # Common locations for CMake+Doxygen output:
+          if [ -d "build/docs/html" ]; then
+            echo "Found docs in build/docs/html"
+            DOC_DIR="build/docs/html"
+          elif [ -d "build/html" ]; then
+            echo "Found docs in build/html"
+            DOC_DIR="build/html"
+          elif [ -d "docs/html" ]; then
+            echo "Found docs in docs/html"
+            DOC_DIR="docs/html"
+          else
+            echo "Searching for html directory..."
+            DOC_DIR=$(find build -name "html" -type d | head -1)
+            echo "Found docs in $DOC_DIR"
           fi
+          
+          # Add .nojekyll to prevent Jekyll processing
+          touch "$DOC_DIR/.nojekyll"
+          
+          # Ensure index.html exists (Doxygen might use files.html as main)
+          if [ ! -f "$DOC_DIR/index.html" ] && [ -f "$DOC_DIR/files.html" ]; then
+            echo "Creating index.html redirect to files.html"
+            echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=files.html"></head></html>' > "$DOC_DIR/index.html"
+          fi
+          
+          # List contents for debugging
+          echo "Documentation contents:"
+          ls -la "$DOC_DIR" | head -20
+          
+          # Store the path for the next step
+          echo "DOC_PATH=$DOC_DIR" >> $GITHUB_ENV
 
       # Setup Pages
       - name: Setup Pages
@@ -49,7 +84,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/html
+          path: ${{ env.DOC_PATH }}
 
       # Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
