@@ -87,8 +87,8 @@ int main() {
 
     printf("%d\n", *ptr);
 
-    printf("Size of int pointer %d\n", sizeof(int*));
-    printf("Size of char pointer %d\n", sizeof(char*));
+    printf("Size of int pointer %lu\n", sizeof(int*));
+    printf("Size of char pointer %lu\n", sizeof(char*));
 
     return 0;
 }

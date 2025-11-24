@@ -3,6 +3,8 @@ project(extremeC C)
 
 set(CMAKE_C_STANDARD 23)
 
+set(CMAKE_LINKER_TYPE GOLD)
+
 add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
 
 #################################
