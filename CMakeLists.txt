@@ -3,7 +3,7 @@ project(extremeC C)
 
 set(CMAKE_C_STANDARD 23)
 
-set(CMAKE_LINKER_TYPE GOLD)
+#set(CMAKE_LINKER_TYPE GOLD)
 
 add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
 
@@ -39,8 +39,7 @@ add_custom_target(
         ${ALL_SOURCE_FILES}
 )
 
-add_executable(preproccessors src/preprocessors.c
-        src/variable_pointers.c)
+add_executable(preproccessors src/preprocessors.c)
 add_executable(variable_pointers src/variable_pointers.c)
 add_executable(function src/function.c)
 add_executable(structs src/structs.c)

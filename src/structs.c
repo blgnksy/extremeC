@@ -76,21 +76,19 @@ struct __attribute__((__packed__)) sample1_t {
 } ;
 
 int main(int argc, char** argv) {
-    struct sample_t var;
-    var.first = 'A';
-    var.second = 'B';
-    var.third = 'C';
-    var.fourth = 765;
-    print_size(&var);
-    print_bytes(&var);
+    struct sample_t *var;
+    var->first = 'A';
+    var->second = 'B';
+    var->third = 'C';
+    var->fourth = 765;
+    print_size(var);
+    print_bytes(var);
 
-    struct sample1_t var1;
-    var1.first = 'A';
-    var1.second = 'B';
-    var1.third = 'C';
-    var1.fourth = 765;
-    print_size(&var1);
-    print_bytes(&var1);
+    struct sample1_t *var1;
+    var1->first = 'A';
+    var1->second = 'B';
+    var1->third = 'C';
+    var1->fourth = 765;
 
     return 0;
 }

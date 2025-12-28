@@ -283,7 +283,7 @@ void player_shoot(player_t* player) {
     // We need to check if the player has picked up the gun
     // otherwise, shooting is meaningless
     if (player->gun) {
-        gun_trigger(player->gun);
+        // gun_trigger(player->gun);
     } else {
         printf("Player wants to shoot but he doesn't have a gun!");
         exit(1);
