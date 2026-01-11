@@ -119,3 +119,5 @@ _generate/
 
 .idea/
 
+.cache/
+.vscode/
