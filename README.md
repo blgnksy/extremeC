@@ -1,3 +1,3 @@
 # extreme C Notes
 
-from markdown
+## GDB notes [GDB notes](./GDB_README.md)
