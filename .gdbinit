@@ -1936,6 +1936,1035 @@ document core_bt_all
 end
 
 #==============================================================================
+# LINUX KERNEL DEBUGGING
+#==============================================================================
+#
+# For full kernel debugging support, load the kernel's GDB scripts:
+#   (gdb) add-auto-load-safe-path /path/to/linux/scripts/gdb/vmlinux-gdb.py
+#   (gdb) source /path/to/linux/scripts/gdb/vmlinux-gdb.py
+#
+# Or add to your .gdbinit:
+#   add-auto-load-safe-path /path/to/linux
+#   set auto-load safe-path /
+#
+# The kernel provides: lx-dmesg, lx-lsmod, lx-ps, lx-symbols, etc.
+# Type 'apropos lx-' to see all kernel commands when loaded.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# Kernel List Helpers (struct list_head)
+#------------------------------------------------------------------------------
+
+define lx_list_head
+    if $argc == 0
+        printf "Usage: lx_list_head <list_head_ptr>\n"
+    else
+        printf "=== list_head @ %p ===\n", $arg0
+        printf "next: %p\n", ((struct list_head *)$arg0)->next
+        printf "prev: %p\n", ((struct list_head *)$arg0)->prev
+        if ((struct list_head *)$arg0)->next == $arg0
+            printf "Status: EMPTY (points to self)\n"
+        else
+            printf "Status: Has entries\n"
+        end
+    end
+end
+document lx_list_head
+    Print struct list_head details.
+    Syntax: lx_list_head <list_head_ptr>
+    Example: lx_list_head &my_list
+end
+
+define lx_list_for_each
+    if $argc < 2
+        printf "Usage: lx_list_for_each <head_ptr> <type> <member> [max]\n"
+        printf "Example: lx_list_for_each &devices \"struct device\" list 10\n"
+    else
+        set $head = (struct list_head *)$arg0
+        set $pos = $head->next
+        set $count = 0
+        set $max = 100
+        if $argc >= 4
+            set $max = $arg3
+        end
+        while $pos != $head && $count < $max
+            set $entry = ($arg1 *)((char *)$pos - (unsigned long)&(($arg1 *)0)->$arg2)
+            printf "[%d] %p: ", $count, $entry
+            p *$entry
+            set $pos = $pos->next
+            set $count++
+        end
+        if $pos != $head
+            printf "... stopped at %d entries (use max param for more)\n", $max
+        end
+        printf "Total entries: %d\n", $count
+    end
+end
+document lx_list_for_each
+    Iterate kernel list_head and print container structures.
+    Uses container_of logic to get the containing structure.
+    Syntax: lx_list_for_each <head_ptr> <container_type> <member_name> [max_entries]
+    Example: lx_list_for_each &module_list "struct module" list 20
+end
+
+define lx_list_count
+    if $argc == 0
+        printf "Usage: lx_list_count <head_ptr>\n"
+    else
+        set $head = (struct list_head *)$arg0
+        set $pos = $head->next
+        set $count = 0
+        while $pos != $head && $count < 10000
+            set $pos = $pos->next
+            set $count++
+        end
+        printf "List entries: %d\n", $count
+    end
+end
+document lx_list_count
+    Count entries in a kernel list_head.
+    Syntax: lx_list_count <head_ptr>
+    Example: lx_list_count &my_list
+end
+
+#------------------------------------------------------------------------------
+# Kernel Hlist Helpers (struct hlist_head/hlist_node)
+#------------------------------------------------------------------------------
+
+define lx_hlist_for_each
+    if $argc < 2
+        printf "Usage: lx_hlist_for_each <hlist_head_ptr> <type> <member> [max]\n"
+    else
+        set $head = (struct hlist_head *)$arg0
+        set $pos = $head->first
+        set $count = 0
+        set $max = 100
+        if $argc >= 4
+            set $max = $arg3
+        end
+        while $pos != 0 && $count < $max
+            set $entry = ($arg1 *)((char *)$pos - (unsigned long)&(($arg1 *)0)->$arg2)
+            printf "[%d] %p: ", $count, $entry
+            p *$entry
+            set $pos = $pos->next
+            set $count++
+        end
+        printf "Total entries: %d\n", $count
+    end
+end
+document lx_hlist_for_each
+    Iterate kernel hlist and print container structures.
+    Syntax: lx_hlist_for_each <hlist_head_ptr> <container_type> <member_name> [max]
+    Example: lx_hlist_for_each &hash_bucket "struct my_entry" hnode
+end
+
+#------------------------------------------------------------------------------
+# Red-Black Tree Helpers (struct rb_root/rb_node)
+#------------------------------------------------------------------------------
+
+define lx_rb_first
+    if $argc == 0
+        printf "Usage: lx_rb_first <rb_root_ptr>\n"
+    else
+        set $n = ((struct rb_root *)$arg0)->rb_node
+        if $n == 0
+            printf "Tree is empty\n"
+        else
+            while $n->rb_left != 0
+                set $n = $n->rb_left
+            end
+            printf "First node: %p\n", $n
+        end
+    end
+end
+document lx_rb_first
+    Find first (leftmost) node in rb_tree.
+    Syntax: lx_rb_first <rb_root_ptr>
+end
+
+define lx_rb_next
+    if $argc == 0
+        printf "Usage: lx_rb_next <rb_node_ptr>\n"
+    else
+        set $node = (struct rb_node *)$arg0
+        if $node->rb_right
+            set $node = $node->rb_right
+            while $node->rb_left
+                set $node = $node->rb_left
+            end
+            printf "Next node: %p\n", $node
+        else
+            set $parent = $node->__rb_parent_color & ~3
+            while $parent && $node == ((struct rb_node *)$parent)->rb_right
+                set $node = (struct rb_node *)$parent
+                set $parent = $node->__rb_parent_color & ~3
+            end
+            if $parent
+                printf "Next node: %p\n", $parent
+            else
+                printf "No next node (was last)\n"
+            end
+        end
+    end
+end
+document lx_rb_next
+    Find next node in rb_tree traversal.
+    Syntax: lx_rb_next <rb_node_ptr>
+end
+
+define lx_rb_for_each
+    if $argc < 3
+        printf "Usage: lx_rb_for_each <rb_root_ptr> <type> <member> [max]\n"
+    else
+        set $root = (struct rb_root *)$arg0
+        set $max = 100
+        if $argc >= 4
+            set $max = $arg3
+        end
+        set $count = 0
+        # Find first
+        set $n = $root->rb_node
+        if $n != 0
+            while $n->rb_left != 0
+                set $n = $n->rb_left
+            end
+            while $n != 0 && $count < $max
+                set $entry = ($arg1 *)((char *)$n - (unsigned long)&(($arg1 *)0)->$arg2)
+                printf "[%d] %p: ", $count, $entry
+                p *$entry
+                set $count++
+                # rb_next inline
+                if $n->rb_right
+                    set $n = $n->rb_right
+                    while $n->rb_left
+                        set $n = $n->rb_left
+                    end
+                else
+                    set $parent = (struct rb_node *)($n->__rb_parent_color & ~3)
+                    while $parent && $n == $parent->rb_right
+                        set $n = $parent
+                        set $parent = (struct rb_node *)($n->__rb_parent_color & ~3)
+                    end
+                    set $n = $parent
+                end
+            end
+        end
+        printf "Total entries: %d\n", $count
+    end
+end
+document lx_rb_for_each
+    Iterate rb_tree in-order and print container structures.
+    Syntax: lx_rb_for_each <rb_root_ptr> <container_type> <member_name> [max]
+    Example: lx_rb_for_each &my_tree "struct my_node" rb
+end
+
+#------------------------------------------------------------------------------
+# Task/Process Helpers
+#------------------------------------------------------------------------------
+
+define lx_current
+    printf "=== Current Task ===\n"
+    p $lx_current()
+end
+document lx_current
+    Print current task_struct (requires kernel GDB scripts loaded).
+    Usage: lx_current
+end
+
+define lx_task_info
+    if $argc == 0
+        printf "Usage: lx_task_info <task_struct_ptr>\n"
+    else
+        set $t = (struct task_struct *)$arg0
+        printf "=== task_struct @ %p ===\n", $t
+        printf "comm:       %.16s\n", $t->comm
+        printf "pid:        %d\n", $t->pid
+        printf "tgid:       %d\n", $t->tgid
+        printf "state:      %ld\n", $t->__state
+        printf "flags:      0x%x\n", $t->flags
+        printf "on_cpu:     %d\n", $t->on_cpu
+        printf "prio:       %d\n", $t->prio
+        printf "policy:     %d\n", $t->policy
+        printf "nr_cpus_allowed: %d\n", $t->nr_cpus_allowed
+        printf "mm:         %p\n", $t->mm
+        printf "active_mm:  %p\n", $t->active_mm
+        printf "parent:     %p (pid %d)\n", $t->parent, $t->parent->pid
+        printf "real_parent:%p (pid %d)\n", $t->real_parent, $t->real_parent->pid
+    end
+end
+document lx_task_info
+    Print task_struct details.
+    Syntax: lx_task_info <task_struct_ptr>
+    Example: lx_task_info init_task
+end
+
+define lx_task_stack
+    if $argc == 0
+        printf "Usage: lx_task_stack <task_struct_ptr>\n"
+    else
+        set $t = (struct task_struct *)$arg0
+        printf "=== Task Stack Info ===\n"
+        printf "stack:      %p\n", $t->stack
+        # Stack end is typically stack + THREAD_SIZE
+        printf "Stack pointer (if saved): check thread.sp\n"
+    end
+end
+document lx_task_stack
+    Print task stack information.
+    Syntax: lx_task_stack <task_struct_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Spinlock / Mutex / RwLock Helpers
+#------------------------------------------------------------------------------
+
+define lx_spinlock
+    if $argc == 0
+        printf "Usage: lx_spinlock <spinlock_t_ptr>\n"
+    else
+        printf "=== spinlock_t @ %p ===\n", $arg0
+        # Raw spinlock structure varies by config
+        # For ticket spinlock:
+        printf "raw_lock: "
+        p ((spinlock_t *)$arg0)->rlock.raw_lock
+    end
+end
+document lx_spinlock
+    Print spinlock_t state.
+    Syntax: lx_spinlock <spinlock_t_ptr>
+    Note: Internal structure varies by kernel config (TICKET, QUEUED, etc.)
+end
+
+define lx_mutex
+    if $argc == 0
+        printf "Usage: lx_mutex <mutex_ptr>\n"
+    else
+        set $m = (struct mutex *)$arg0
+        printf "=== struct mutex @ %p ===\n", $m
+        printf "owner:      %p\n", $m->owner
+        printf "wait_lock:  "
+        p $m->wait_lock
+        printf "wait_list empty: %d\n", $m->wait_list.next == &$m->wait_list
+    end
+end
+document lx_mutex
+    Print kernel mutex state.
+    Syntax: lx_mutex <mutex_ptr>
+end
+
+define lx_rwlock
+    if $argc == 0
+        printf "Usage: lx_rwlock <rwlock_t_ptr>\n"
+    else
+        printf "=== rwlock_t @ %p ===\n", $arg0
+        p *((rwlock_t *)$arg0)
+    end
+end
+document lx_rwlock
+    Print rwlock_t state.
+    Syntax: lx_rwlock <rwlock_t_ptr>
+end
+
+define lx_semaphore
+    if $argc == 0
+        printf "Usage: lx_semaphore <semaphore_ptr>\n"
+    else
+        set $s = (struct semaphore *)$arg0
+        printf "=== struct semaphore @ %p ===\n", $s
+        printf "count:      %d\n", $s->count
+        printf "wait_list empty: %d\n", $s->wait_list.next == &$s->wait_list
+    end
+end
+document lx_semaphore
+    Print kernel semaphore state.
+    Syntax: lx_semaphore <semaphore_ptr>
+end
+
+define lx_rcu
+    printf "=== RCU State ===\n"
+    printf "Check rcu_state, rcu_data per-cpu variables\n"
+    printf "rcu_state: "
+    p rcu_state
+end
+document lx_rcu
+    Print RCU subsystem state.
+    Usage: lx_rcu
+end
+
+#------------------------------------------------------------------------------
+# Wait Queue Helpers
+#------------------------------------------------------------------------------
+
+define lx_waitqueue
+    if $argc == 0
+        printf "Usage: lx_waitqueue <wait_queue_head_ptr>\n"
+    else
+        set $wq = (struct wait_queue_head *)$arg0
+        printf "=== wait_queue_head @ %p ===\n", $wq
+        printf "lock: "
+        p $wq->lock
+        set $head = &$wq->head
+        set $pos = $head->next
+        set $count = 0
+        while $pos != $head && $count < 100
+            set $entry = (struct wait_queue_entry *)((char *)$pos - (unsigned long)&((struct wait_queue_entry *)0)->entry)
+            printf "[%d] wait_queue_entry @ %p\n", $count, $entry
+            printf "     flags: 0x%x\n", $entry->flags
+            printf "     private (task): %p\n", $entry->private
+            set $pos = $pos->next
+            set $count++
+        end
+        if $count == 0
+            printf "Wait queue is empty\n"
+        else
+            printf "Total waiters: %d\n", $count
+        end
+    end
+end
+document lx_waitqueue
+    Print wait_queue_head and list all waiters.
+    Syntax: lx_waitqueue <wait_queue_head_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Work Queue Helpers
+#------------------------------------------------------------------------------
+
+define lx_work_struct
+    if $argc == 0
+        printf "Usage: lx_work_struct <work_struct_ptr>\n"
+    else
+        set $w = (struct work_struct *)$arg0
+        printf "=== work_struct @ %p ===\n", $w
+        printf "data:       0x%lx\n", $w->data
+        printf "func:       %p ", $w->func
+        info symbol $w->func
+        printf "entry.next: %p\n", $w->entry.next
+        printf "entry.prev: %p\n", $w->entry.prev
+    end
+end
+document lx_work_struct
+    Print work_struct details.
+    Syntax: lx_work_struct <work_struct_ptr>
+end
+
+define lx_delayed_work
+    if $argc == 0
+        printf "Usage: lx_delayed_work <delayed_work_ptr>\n"
+    else
+        set $dw = (struct delayed_work *)$arg0
+        printf "=== delayed_work @ %p ===\n", $dw
+        printf "work.func:  %p ", $dw->work.func
+        info symbol $dw->work.func
+        printf "timer:      %p\n", &$dw->timer
+    end
+end
+document lx_delayed_work
+    Print delayed_work details.
+    Syntax: lx_delayed_work <delayed_work_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Timer Helpers
+#------------------------------------------------------------------------------
+
+define lx_timer
+    if $argc == 0
+        printf "Usage: lx_timer <timer_list_ptr>\n"
+    else
+        set $t = (struct timer_list *)$arg0
+        printf "=== timer_list @ %p ===\n", $t
+        printf "expires:    %lu\n", $t->expires
+        printf "function:   %p ", $t->function
+        info symbol $t->function
+        printf "flags:      0x%x\n", $t->flags
+    end
+end
+document lx_timer
+    Print timer_list details.
+    Syntax: lx_timer <timer_list_ptr>
+end
+
+define lx_hrtimer
+    if $argc == 0
+        printf "Usage: lx_hrtimer <hrtimer_ptr>\n"
+    else
+        set $t = (struct hrtimer *)$arg0
+        printf "=== hrtimer @ %p ===\n", $t
+        printf "function:   %p ", $t->function
+        info symbol $t->function
+        printf "state:      %d\n", $t->state
+        printf "_softexpires: %lld\n", $t->_softexpires
+    end
+end
+document lx_hrtimer
+    Print hrtimer details.
+    Syntax: lx_hrtimer <hrtimer_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Memory Management Helpers
+#------------------------------------------------------------------------------
+
+define lx_page
+    if $argc == 0
+        printf "Usage: lx_page <page_ptr>\n"
+    else
+        set $pg = (struct page *)$arg0
+        printf "=== struct page @ %p ===\n", $pg
+        printf "flags:      0x%lx\n", $pg->flags
+        printf "_refcount:  %d\n", $pg->_refcount.counter
+        printf "_mapcount:  %d\n", $pg->_mapcount.counter
+        printf "mapping:    %p\n", $pg->mapping
+        printf "index:      %lu\n", $pg->index
+    end
+end
+document lx_page
+    Print struct page details.
+    Syntax: lx_page <page_ptr>
+end
+
+define lx_vma
+    if $argc == 0
+        printf "Usage: lx_vma <vm_area_struct_ptr>\n"
+    else
+        set $v = (struct vm_area_struct *)$arg0
+        printf "=== vm_area_struct @ %p ===\n", $v
+        printf "vm_start:   0x%lx\n", $v->vm_start
+        printf "vm_end:     0x%lx\n", $v->vm_end
+        printf "vm_flags:   0x%lx\n", $v->vm_flags
+        printf "vm_pgoff:   %lu\n", $v->vm_pgoff
+        printf "vm_file:    %p\n", $v->vm_file
+        if $v->vm_file
+            printf "  filename: %s\n", $v->vm_file->f_path.dentry->d_name.name
+        end
+        printf "vm_mm:      %p\n", $v->vm_mm
+    end
+end
+document lx_vma
+    Print vm_area_struct details.
+    Syntax: lx_vma <vm_area_struct_ptr>
+end
+
+define lx_mm
+    if $argc == 0
+        printf "Usage: lx_mm <mm_struct_ptr>\n"
+    else
+        set $mm = (struct mm_struct *)$arg0
+        printf "=== mm_struct @ %p ===\n", $mm
+        printf "pgd:         %p\n", $mm->pgd
+        printf "mm_users:    %d\n", $mm->mm_users.counter
+        printf "mm_count:    %d\n", $mm->mm_count.counter
+        printf "map_count:   %d\n", $mm->map_count
+        printf "total_vm:    %lu pages\n", $mm->total_vm
+        printf "locked_vm:   %lu pages\n", $mm->locked_vm
+        printf "pinned_vm:   %lu pages\n", $mm->pinned_vm.counter
+        printf "stack_vm:    %lu pages\n", $mm->stack_vm
+        printf "start_code:  0x%lx\n", $mm->start_code
+        printf "end_code:    0x%lx\n", $mm->end_code
+        printf "start_data:  0x%lx\n", $mm->start_data
+        printf "end_data:    0x%lx\n", $mm->end_data
+        printf "start_brk:   0x%lx\n", $mm->start_brk
+        printf "brk:         0x%lx\n", $mm->brk
+        printf "start_stack: 0x%lx\n", $mm->start_stack
+    end
+end
+document lx_mm
+    Print mm_struct details.
+    Syntax: lx_mm <mm_struct_ptr>
+end
+
+define lx_slab_cache
+    if $argc == 0
+        printf "Usage: lx_slab_cache <kmem_cache_ptr>\n"
+    else
+        set $s = (struct kmem_cache *)$arg0
+        printf "=== kmem_cache @ %p ===\n", $s
+        printf "name:        %s\n", $s->name
+        printf "object_size: %u\n", $s->object_size
+        printf "size:        %u\n", $s->size
+        printf "align:       %u\n", $s->align
+        printf "flags:       0x%x\n", $s->flags
+    end
+end
+document lx_slab_cache
+    Print kmem_cache (slab) details.
+    Syntax: lx_slab_cache <kmem_cache_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Per-CPU Variable Helpers
+#------------------------------------------------------------------------------
+
+define lx_per_cpu
+    if $argc < 2
+        printf "Usage: lx_per_cpu <per_cpu_var> <cpu_num>\n"
+        printf "Example: lx_per_cpu runqueues 0\n"
+    else
+        set $offset = __per_cpu_offset[$arg1]
+        set $ptr = (void *)((unsigned long)&$arg0 + $offset)
+        printf "Per-CPU variable '%s' on CPU %d:\n", "$arg0", $arg1
+        printf "Address: %p\n", $ptr
+        p *($ptr)
+    end
+end
+document lx_per_cpu
+    Access per-CPU variable for specific CPU.
+    Syntax: lx_per_cpu <variable_name> <cpu_number>
+    Example: lx_per_cpu runqueues 0
+end
+
+define lx_this_cpu
+    if $argc == 0
+        printf "Usage: lx_this_cpu <per_cpu_var>\n"
+    else
+        # Assumes we can determine current CPU from context
+        printf "Use lx_per_cpu with explicit CPU number\n"
+        printf "Current CPU detection requires running target\n"
+    end
+end
+document lx_this_cpu
+    Access per-CPU variable for current CPU.
+    Syntax: lx_this_cpu <variable_name>
+    Note: For crash dumps, use lx_per_cpu with explicit CPU number.
+end
+
+#------------------------------------------------------------------------------
+# Device / Driver Helpers
+#------------------------------------------------------------------------------
+
+define lx_device
+    if $argc == 0
+        printf "Usage: lx_device <device_ptr>\n"
+    else
+        set $d = (struct device *)$arg0
+        printf "=== struct device @ %p ===\n", $d
+        printf "kobj.name:     %s\n", $d->kobj.name
+        printf "init_name:     %s\n", $d->init_name ? $d->init_name : "(null)"
+        printf "bus:           %p", $d->bus
+        if $d->bus
+            printf " (%s)", $d->bus->name
+        end
+        printf "\n"
+        printf "driver:        %p", $d->driver
+        if $d->driver
+            printf " (%s)", $d->driver->name
+        end
+        printf "\n"
+        printf "parent:        %p\n", $d->parent
+        printf "driver_data:   %p\n", $d->driver_data
+    end
+end
+document lx_device
+    Print struct device details.
+    Syntax: lx_device <device_ptr>
+end
+
+define lx_pci_dev
+    if $argc == 0
+        printf "Usage: lx_pci_dev <pci_dev_ptr>\n"
+    else
+        set $p = (struct pci_dev *)$arg0
+        printf "=== pci_dev @ %p ===\n", $p
+        printf "vendor:      0x%04x\n", $p->vendor
+        printf "device:      0x%04x\n", $p->device
+        printf "subsystem_vendor: 0x%04x\n", $p->subsystem_vendor
+        printf "subsystem_device: 0x%04x\n", $p->subsystem_device
+        printf "class:       0x%06x\n", $p->class
+        printf "devfn:       %d (slot %d, func %d)\n", $p->devfn, $p->devfn >> 3, $p->devfn & 7
+        printf "irq:         %u\n", $p->irq
+        printf "driver:      %p", $p->driver
+        if $p->driver
+            printf " (%s)", $p->driver->name
+        end
+        printf "\n"
+    end
+end
+document lx_pci_dev
+    Print pci_dev details.
+    Syntax: lx_pci_dev <pci_dev_ptr>
+end
+
+define lx_platform_device
+    if $argc == 0
+        printf "Usage: lx_platform_device <platform_device_ptr>\n"
+    else
+        set $p = (struct platform_device *)$arg0
+        printf "=== platform_device @ %p ===\n", $p
+        printf "name:        %s\n", $p->name
+        printf "id:          %d\n", $p->id
+        printf "num_resources: %u\n", $p->num_resources
+        printf "dev:         %p\n", &$p->dev
+    end
+end
+document lx_platform_device
+    Print platform_device details.
+    Syntax: lx_platform_device <platform_device_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Network Helpers
+#------------------------------------------------------------------------------
+
+define lx_sk_buff
+    if $argc == 0
+        printf "Usage: lx_sk_buff <sk_buff_ptr>\n"
+    else
+        set $skb = (struct sk_buff *)$arg0
+        printf "=== sk_buff @ %p ===\n", $skb
+        printf "len:         %u\n", $skb->len
+        printf "data_len:    %u\n", $skb->data_len
+        printf "mac_len:     %u\n", $skb->mac_len
+        printf "protocol:    0x%04x\n", $skb->protocol
+        printf "head:        %p\n", $skb->head
+        printf "data:        %p\n", $skb->data
+        printf "tail:        %u\n", $skb->tail
+        printf "end:         %u\n", $skb->end
+        printf "dev:         %p", $skb->dev
+        if $skb->dev
+            printf " (%s)", $skb->dev->name
+        end
+        printf "\n"
+        printf "sk:          %p\n", $skb->sk
+    end
+end
+document lx_sk_buff
+    Print sk_buff (socket buffer) details.
+    Syntax: lx_sk_buff <sk_buff_ptr>
+end
+
+define lx_net_device
+    if $argc == 0
+        printf "Usage: lx_net_device <net_device_ptr>\n"
+    else
+        set $nd = (struct net_device *)$arg0
+        printf "=== net_device @ %p ===\n", $nd
+        printf "name:        %s\n", $nd->name
+        printf "ifindex:     %d\n", $nd->ifindex
+        printf "mtu:         %u\n", $nd->mtu
+        printf "flags:       0x%x\n", $nd->flags
+        printf "state:       0x%lx\n", $nd->state
+        printf "dev_addr:    %02x:%02x:%02x:%02x:%02x:%02x\n", \
+            $nd->dev_addr[0], $nd->dev_addr[1], $nd->dev_addr[2], \
+            $nd->dev_addr[3], $nd->dev_addr[4], $nd->dev_addr[5]
+        printf "netdev_ops:  %p\n", $nd->netdev_ops
+    end
+end
+document lx_net_device
+    Print net_device details.
+    Syntax: lx_net_device <net_device_ptr>
+end
+
+define lx_sock
+    if $argc == 0
+        printf "Usage: lx_sock <sock_ptr>\n"
+    else
+        set $sk = (struct sock *)$arg0
+        printf "=== struct sock @ %p ===\n", $sk
+        printf "sk_state:     %d\n", (int)$sk->__sk_common.skc_state
+        printf "sk_family:    %d\n", $sk->__sk_common.skc_family
+        printf "sk_type:      %d\n", $sk->sk_type
+        printf "sk_protocol:  %d\n", $sk->sk_protocol
+        printf "sk_rcvbuf:    %d\n", $sk->sk_rcvbuf
+        printf "sk_sndbuf:    %d\n", $sk->sk_sndbuf
+    end
+end
+document lx_sock
+    Print struct sock details.
+    Syntax: lx_sock <sock_ptr>
+end
+
+#------------------------------------------------------------------------------
+# File System Helpers
+#------------------------------------------------------------------------------
+
+define lx_inode
+    if $argc == 0
+        printf "Usage: lx_inode <inode_ptr>\n"
+    else
+        set $i = (struct inode *)$arg0
+        printf "=== struct inode @ %p ===\n", $i
+        printf "i_ino:       %lu\n", $i->i_ino
+        printf "i_mode:      0%o\n", $i->i_mode
+        printf "i_nlink:     %u\n", $i->i_nlink
+        printf "i_uid:       %u\n", $i->i_uid.val
+        printf "i_gid:       %u\n", $i->i_gid.val
+        printf "i_size:      %lld\n", $i->i_size
+        printf "i_blocks:    %lu\n", $i->i_blocks
+        printf "i_sb:        %p\n", $i->i_sb
+        printf "i_op:        %p\n", $i->i_op
+        printf "i_fop:       %p\n", $i->i_fop
+    end
+end
+document lx_inode
+    Print struct inode details.
+    Syntax: lx_inode <inode_ptr>
+end
+
+define lx_dentry
+    if $argc == 0
+        printf "Usage: lx_dentry <dentry_ptr>\n"
+    else
+        set $d = (struct dentry *)$arg0
+        printf "=== struct dentry @ %p ===\n", $d
+        printf "d_name:      %s\n", $d->d_name.name
+        printf "d_inode:     %p\n", $d->d_inode
+        printf "d_parent:    %p\n", $d->d_parent
+        printf "d_flags:     0x%x\n", $d->d_flags
+        printf "d_sb:        %p\n", $d->d_sb
+    end
+end
+document lx_dentry
+    Print struct dentry details.
+    Syntax: lx_dentry <dentry_ptr>
+end
+
+define lx_file
+    if $argc == 0
+        printf "Usage: lx_file <file_ptr>\n"
+    else
+        set $f = (struct file *)$arg0
+        printf "=== struct file @ %p ===\n", $f
+        printf "f_path.dentry: %p\n", $f->f_path.dentry
+        if $f->f_path.dentry
+            printf "  name:      %s\n", $f->f_path.dentry->d_name.name
+        end
+        printf "f_inode:     %p\n", $f->f_inode
+        printf "f_op:        %p\n", $f->f_op
+        printf "f_count:     %ld\n", $f->f_count.counter
+        printf "f_flags:     0x%x\n", $f->f_flags
+        printf "f_mode:      0x%x\n", $f->f_mode
+        printf "f_pos:       %lld\n", $f->f_pos
+    end
+end
+document lx_file
+    Print struct file details.
+    Syntax: lx_file <file_ptr>
+end
+
+define lx_super_block
+    if $argc == 0
+        printf "Usage: lx_super_block <super_block_ptr>\n"
+    else
+        set $sb = (struct super_block *)$arg0
+        printf "=== super_block @ %p ===\n", $sb
+        printf "s_type:      %p (%s)\n", $sb->s_type, $sb->s_type->name
+        printf "s_id:        %s\n", $sb->s_id
+        printf "s_blocksize: %lu\n", $sb->s_blocksize
+        printf "s_flags:     0x%lx\n", $sb->s_flags
+        printf "s_root:      %p\n", $sb->s_root
+    end
+end
+document lx_super_block
+    Print super_block details.
+    Syntax: lx_super_block <super_block_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Interrupt / IRQ Helpers
+#------------------------------------------------------------------------------
+
+define lx_irq_desc
+    if $argc == 0
+        printf "Usage: lx_irq_desc <irq_number>\n"
+    else
+        set $desc = irq_desc[$arg0]
+        printf "=== irq_desc[%d] @ %p ===\n", $arg0, $desc
+        printf "irq_data.irq:   %u\n", $desc->irq_data.irq
+        printf "irq_data.hwirq: %lu\n", $desc->irq_data.hwirq
+        printf "action:         %p\n", $desc->action
+        if $desc->action
+            printf "  handler:      %p ", $desc->action->handler
+            info symbol $desc->action->handler
+            printf "  name:         %s\n", $desc->action->name
+        end
+        printf "depth:          %u\n", $desc->depth
+        printf "irq_count:      %u\n", $desc->irq_count
+    end
+end
+document lx_irq_desc
+    Print irq_desc for given IRQ number.
+    Syntax: lx_irq_desc <irq_number>
+    Example: lx_irq_desc 42
+end
+
+#------------------------------------------------------------------------------
+# Module Helpers
+#------------------------------------------------------------------------------
+
+define lx_module
+    if $argc == 0
+        printf "Usage: lx_module <module_ptr>\n"
+    else
+        set $m = (struct module *)$arg0
+        printf "=== struct module @ %p ===\n", $m
+        printf "name:           %s\n", $m->name
+        printf "state:          %d (0=LIVE, 1=COMING, 2=GOING)\n", $m->state
+        printf "core_layout.base: %p\n", $m->core_layout.base
+        printf "core_layout.size: %u\n", $m->core_layout.size
+        printf "init_layout.base: %p\n", $m->init_layout.base
+        printf "init_layout.size: %u\n", $m->init_layout.size
+    end
+end
+document lx_module
+    Print struct module details.
+    Syntax: lx_module <module_ptr>
+end
+
+#------------------------------------------------------------------------------
+# Kernel Debugging Utilities
+#------------------------------------------------------------------------------
+
+define lx_container_of
+    if $argc < 3
+        printf "Usage: lx_container_of <ptr> <type> <member>\n"
+        printf "Returns the container structure address\n"
+    else
+        set $container = ($arg1 *)((char *)$arg0 - (unsigned long)&(($arg1 *)0)->$arg2)
+        printf "Container address: %p\n", $container
+        p *$container
+    end
+end
+document lx_container_of
+    Perform container_of operation.
+    Syntax: lx_container_of <member_ptr> <container_type> <member_name>
+    Example: lx_container_of list_ptr "struct my_struct" list
+end
+
+define lx_offsetof
+    if $argc < 2
+        printf "Usage: lx_offsetof <type> <member>\n"
+    else
+        printf "offsetof(%s, %s) = %lu\n", "$arg0", "$arg1", (unsigned long)&(($arg0 *)0)->$arg1
+    end
+end
+document lx_offsetof
+    Calculate offsetof a member in a structure.
+    Syntax: lx_offsetof <type> <member>
+    Example: lx_offsetof "struct task_struct" comm
+end
+
+define lx_typeof
+    if $argc == 0
+        printf "Usage: lx_typeof <expression>\n"
+    else
+        whatis $arg0
+    end
+end
+document lx_typeof
+    Print type of expression (alias for whatis).
+    Syntax: lx_typeof <expression>
+end
+
+define lx_symbol
+    if $argc == 0
+        printf "Usage: lx_symbol <address>\n"
+    else
+        info symbol $arg0
+    end
+end
+document lx_symbol
+    Find symbol name for address.
+    Syntax: lx_symbol <address>
+end
+
+define lx_addr
+    if $argc == 0
+        printf "Usage: lx_addr <symbol>\n"
+    else
+        printf "%s is at %p\n", "$arg0", &$arg0
+    end
+end
+document lx_addr
+    Get address of symbol.
+    Syntax: lx_addr <symbol_name>
+end
+
+#------------------------------------------------------------------------------
+# Kernel Initialization / Debugging Scenario Helpers
+#------------------------------------------------------------------------------
+
+define lx_dmesg_manual
+    printf "=== Kernel Log Buffer ===\n"
+    printf "For full dmesg, use 'lx-dmesg' (requires kernel GDB scripts)\n"
+    printf "Or examine log_buf manually:\n"
+    printf "  p log_buf\n"
+    printf "  x/1000s log_buf\n"
+end
+document lx_dmesg_manual
+    Instructions for viewing kernel log buffer.
+    Usage: lx_dmesg_manual
+    Note: Use 'lx-dmesg' if kernel GDB scripts are loaded.
+end
+
+define lx_panic_info
+    printf "=== Panic Information ===\n"
+    printf "Check these for panic context:\n"
+    printf "  p panic_cpu\n"
+    printf "  p panic_notifiers\n"
+    printf "  bt (for panic backtrace)\n"
+    printf "  lx_dmesg_manual (for kernel log)\n"
+end
+document lx_panic_info
+    Print hints for examining kernel panic.
+    Usage: lx_panic_info
+end
+
+define lx_oops_info
+    printf "=== Oops Information ===\n"
+    printf "For oops analysis:\n"
+    printf "  1. Check backtrace: bt\n"
+    printf "  2. Check faulting address in registers\n"
+    printf "  3. lx_task_info on current task\n"
+    printf "  4. Check dmesg for oops message\n"
+end
+document lx_oops_info
+    Print hints for examining kernel oops.
+    Usage: lx_oops_info
+end
+
+#------------------------------------------------------------------------------
+# Kernel Quick Reference
+#------------------------------------------------------------------------------
+
+define lx_help
+    printf "=== Linux Kernel GDB Commands ===\n\n"
+    printf "Data Structures:\n"
+    printf "  lx_list_head, lx_list_for_each, lx_list_count\n"
+    printf "  lx_hlist_for_each\n"
+    printf "  lx_rb_first, lx_rb_next, lx_rb_for_each\n"
+    printf "  lx_container_of, lx_offsetof\n\n"
+    printf "Tasks/Processes:\n"
+    printf "  lx_task_info, lx_task_stack, lx_current\n\n"
+    printf "Synchronization:\n"
+    printf "  lx_spinlock, lx_mutex, lx_rwlock, lx_semaphore, lx_rcu\n"
+    printf "  lx_waitqueue\n\n"
+    printf "Work/Timers:\n"
+    printf "  lx_work_struct, lx_delayed_work\n"
+    printf "  lx_timer, lx_hrtimer\n\n"
+    printf "Memory:\n"
+    printf "  lx_page, lx_vma, lx_mm, lx_slab_cache\n"
+    printf "  lx_per_cpu\n\n"
+    printf "Devices:\n"
+    printf "  lx_device, lx_pci_dev, lx_platform_device\n\n"
+    printf "Network:\n"
+    printf "  lx_sk_buff, lx_net_device, lx_sock\n\n"
+    printf "Filesystem:\n"
+    printf "  lx_inode, lx_dentry, lx_file, lx_super_block\n\n"
+    printf "Other:\n"
+    printf "  lx_irq_desc, lx_module\n"
+    printf "  lx_symbol, lx_addr\n"
+    printf "  lx_panic_info, lx_oops_info\n\n"
+    printf "Note: For full kernel support, load kernel GDB scripts:\n"
+    printf "  source /path/to/linux/scripts/gdb/vmlinux-gdb.py\n"
+    printf "Then use 'apropos lx-' to see all kernel commands.\n"
+end
+document lx_help
+    Show Linux kernel debugging commands quick reference.
+    Usage: lx_help
+end
+
+#==============================================================================
 # CONVENIENCE ALIASES (only non-conflicting with GDB builtins)
 #==============================================================================
 
@@ -1977,6 +3006,11 @@ define gdb_help
     printf "  gst_element, gst_pad, gst_buffer, gst_caps, gst_message, gst_event\n\n"
     printf "DeepStream/CUDA:\n"
     printf "  cuda_error, cuda_sync, nvds_batch_meta, nvds_frame_meta, nvds_obj_meta\n\n"
+    printf "Linux Kernel (type 'lx_help' for full list):\n"
+    printf "  lx_list_for_each, lx_rb_for_each, lx_hlist_for_each\n"
+    printf "  lx_task_info, lx_spinlock, lx_mutex, lx_waitqueue\n"
+    printf "  lx_page, lx_vma, lx_mm, lx_sk_buff, lx_net_device\n"
+    printf "  lx_inode, lx_dentry, lx_file, lx_device, lx_pci_dev\n\n"
     printf "Breakpoints:\n"
     printf "  bp, bpc, bpt, bpregex, bp_save, bp_load, bpe, bpd\n\n"
     printf "Watchpoints:\n"
@@ -2002,8 +3036,9 @@ end
 #==============================================================================
 
 printf "\n"
-printf "╔══════════════════════════════════════════════════════════════╗\n"
-printf "║     Custom .gdbinit loaded - C/C++/Python/GStreamer/CUDA     ║\n"
-printf "║          Type 'gdb_help' for command reference               ║\n"
-printf "╚══════════════════════════════════════════════════════════════╝\n"
+printf "╔════════════════════════════════════════════════════════════════════╗\n"
+printf "║   Custom .gdbinit loaded - C/C++/Python/GStreamer/CUDA/Kernel      ║\n"
+printf "║            Type 'gdb_help' for command reference                   ║\n"
+printf "║            Type 'lx_help' for kernel commands                      ║\n"
+printf "╚════════════════════════════════════════════════════════════════════╝\n"
 printf "\n"

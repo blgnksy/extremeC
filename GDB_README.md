@@ -11,6 +11,7 @@ A feature-rich `.gdbinit` configuration for debugging C, C++, and Python applica
 - **Thread Debugging** - Deadlock detection, mutex inspection, multi-thread backtraces
 - **GStreamer Support** - Inspect elements, pads, buffers, caps, messages, and events
 - **DeepStream/CUDA** - Batch metadata, frame metadata, object metadata, CUDA error checking
+- **Linux Kernel Debugging** - list_head, rb_tree, task_struct, memory management, device/driver inspection
 - **Productivity Shortcuts** - Breakpoint management, session saving, logging, quick examine commands
 
 ## Installation
@@ -53,6 +54,27 @@ sudo apt install gstreamer1.0-plugins-base-dbg gstreamer1.0-plugins-good-dbg
 ### For NVIDIA/DeepStream
 - CUDA Toolkit with debug symbols
 - DeepStream SDK
+
+### For Linux Kernel Debugging
+```bash
+# Kernel with debug info (CONFIG_DEBUG_INFO=y)
+# For QEMU debugging, also enable CONFIG_GDB_SCRIPTS=y
+
+# The kernel source contains GDB Python scripts at:
+# linux/scripts/gdb/vmlinux-gdb.py
+
+# To load kernel scripts in GDB:
+(gdb) add-auto-load-safe-path /path/to/linux
+(gdb) source /path/to/linux/scripts/gdb/vmlinux-gdb.py
+
+# Or add to ~/.gdbinit:
+# add-auto-load-safe-path /path/to/linux
+# set auto-load safe-path /
+
+# Kernel scripts provide commands like:
+# lx-dmesg, lx-lsmod, lx-ps, lx-symbols, lx-version
+# Type 'apropos lx-' after loading to see all
+```
 
 ## Quick Start
 
@@ -154,6 +176,88 @@ gdb ./my_program
 | `nvds_batch_meta` | Print NvDsBatchMeta | `nvds_batch_meta batch` |
 | `nvds_frame_meta` | Print NvDsFrameMeta | `nvds_frame_meta frame` |
 | `nvds_obj_meta` | Print NvDsObjectMeta | `nvds_obj_meta obj` |
+
+### Linux Kernel - Data Structures
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_list_head` | Print list_head info | `lx_list_head &my_list` |
+| `lx_list_for_each` | Iterate list_head | `lx_list_for_each &head "struct foo" list` |
+| `lx_list_count` | Count list entries | `lx_list_count &my_list` |
+| `lx_hlist_for_each` | Iterate hlist | `lx_hlist_for_each &head "struct foo" hnode` |
+| `lx_rb_first` | Find first rb_tree node | `lx_rb_first &my_tree` |
+| `lx_rb_for_each` | Iterate rb_tree | `lx_rb_for_each &root "struct foo" rb` |
+| `lx_container_of` | Get container from member | `lx_container_of ptr "struct foo" member` |
+| `lx_offsetof` | Get member offset | `lx_offsetof "struct task_struct" comm` |
+
+### Linux Kernel - Tasks & Synchronization
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_task_info` | Print task_struct details | `lx_task_info $task` |
+| `lx_task_stack` | Print task stack info | `lx_task_stack $task` |
+| `lx_spinlock` | Print spinlock state | `lx_spinlock &lock` |
+| `lx_mutex` | Print mutex state | `lx_mutex &mutex` |
+| `lx_rwlock` | Print rwlock state | `lx_rwlock &rwlock` |
+| `lx_semaphore` | Print semaphore state | `lx_semaphore &sem` |
+| `lx_waitqueue` | Print wait queue + waiters | `lx_waitqueue &wq` |
+| `lx_rcu` | Print RCU state | `lx_rcu` |
+
+### Linux Kernel - Work & Timers
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_work_struct` | Print work_struct | `lx_work_struct &work` |
+| `lx_delayed_work` | Print delayed_work | `lx_delayed_work &dwork` |
+| `lx_timer` | Print timer_list | `lx_timer &timer` |
+| `lx_hrtimer` | Print hrtimer | `lx_hrtimer &hrt` |
+
+### Linux Kernel - Memory Management
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_page` | Print struct page | `lx_page $page` |
+| `lx_vma` | Print vm_area_struct | `lx_vma $vma` |
+| `lx_mm` | Print mm_struct | `lx_mm $mm` |
+| `lx_slab_cache` | Print kmem_cache | `lx_slab_cache $cache` |
+| `lx_per_cpu` | Access per-CPU variable | `lx_per_cpu runqueues 0` |
+
+### Linux Kernel - Devices & Drivers
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_device` | Print struct device | `lx_device $dev` |
+| `lx_pci_dev` | Print pci_dev | `lx_pci_dev $pdev` |
+| `lx_platform_device` | Print platform_device | `lx_platform_device $pdev` |
+| `lx_module` | Print struct module | `lx_module $mod` |
+| `lx_irq_desc` | Print IRQ descriptor | `lx_irq_desc 42` |
+
+### Linux Kernel - Network
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_sk_buff` | Print sk_buff | `lx_sk_buff $skb` |
+| `lx_net_device` | Print net_device | `lx_net_device $netdev` |
+| `lx_sock` | Print struct sock | `lx_sock $sk` |
+
+### Linux Kernel - Filesystem
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_inode` | Print struct inode | `lx_inode $inode` |
+| `lx_dentry` | Print struct dentry | `lx_dentry $dentry` |
+| `lx_file` | Print struct file | `lx_file $file` |
+| `lx_super_block` | Print super_block | `lx_super_block $sb` |
+
+### Linux Kernel - Utilities
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `lx_symbol` | Find symbol for address | `lx_symbol 0xffffffff81234567` |
+| `lx_addr` | Get address of symbol | `lx_addr init_task` |
+| `lx_panic_info` | Hints for panic analysis | `lx_panic_info` |
+| `lx_oops_info` | Hints for oops analysis | `lx_oops_info` |
+| `lx_help` | Kernel commands reference | `lx_help` |
 
 ### Breakpoints
 
@@ -275,6 +379,57 @@ $ gdb -ex run --args python3 my_app.py
 (gdb) cuda_error            # Check for CUDA errors
 ```
 
+### Linux Kernel Debugging (QEMU/KGDB)
+```gdb
+# Connect to QEMU with kernel debug
+$ gdb vmlinux
+(gdb) target remote :1234
+
+# Load kernel GDB scripts (optional but recommended)
+(gdb) source /path/to/linux/scripts/gdb/vmlinux-gdb.py
+
+# Basic inspection
+(gdb) lx_help               # Show all kernel commands
+(gdb) lx_task_info init_task
+(gdb) lx_list_for_each &modules "struct module" list
+
+# Examine a specific task
+(gdb) p init_task
+(gdb) lx_mm init_task->mm
+
+# Traverse data structures
+(gdb) lx_list_for_each &my_driver->device_list "struct my_device" list 20
+(gdb) lx_rb_for_each &my_tree "struct my_node" rb_node
+```
+
+### Kernel Module Debugging
+```gdb
+# Debug a loaded module
+(gdb) lx_module my_module_ptr
+(gdb) lx_device &my_module->dev
+
+# Examine PCI device
+(gdb) lx_pci_dev pci_dev_ptr
+```
+
+### Kernel Crash Dump Analysis (crash/gdb)
+```gdb
+# Analyze with vmcore
+$ gdb vmlinux vmcore
+
+# Quick analysis
+(gdb) bt                    # Backtrace at crash
+(gdb) lx_panic_info         # Hints for panic analysis
+(gdb) lx_task_info current  # Crashing task
+
+# Memory analysis  
+(gdb) lx_page page_ptr
+(gdb) lx_vma vma_ptr
+
+# Traverse wait queues for hung tasks
+(gdb) lx_waitqueue &completion->wait
+```
+
 ## Customization
 
 ### Disable Catch on Throw
@@ -309,3 +464,5 @@ set history size 5000       # Reduce history
 ## License
 
 This configuration is released under the GPL license, based on original STL views by Dan Marinescu with extensions for modern C++, Python, GStreamer, and NVIDIA tooling.
+
+The Linux kernel debugging commands are inspired by and complement the official kernel GDB scripts found in `linux/scripts/gdb/`
